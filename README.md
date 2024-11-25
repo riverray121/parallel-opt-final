@@ -2,3 +2,5 @@
 
 nvcc bfs.cu -o bfs
 
+
+
