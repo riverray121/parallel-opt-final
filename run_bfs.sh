@@ -12,4 +12,10 @@ echo "Running graph generator..."
 echo "Running BFS..."
 ./bfs
 
+# Compile and run GPU BFS version 1
+echo "Compiling GPU BFS version 1..."
+nvcc -O3 bfs_gpu1.cu -o bfs_gpu1
+echo "Running GPU BFS version 1..."
+./bfs_gpu1
+
 echo "Done!" 
