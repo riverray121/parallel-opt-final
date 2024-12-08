@@ -164,7 +164,7 @@ std::vector<std::vector<int>> read_graph(std::ifstream& file) {
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <branching_factor>\n";
+        // std::cerr << "Usage: " << argv[0] << " <branching_factor>\n";
         return 1;
     }
     
@@ -174,7 +174,7 @@ int main(int argc, char* argv[]) {
     
     std::ifstream file("random_graphs.txt");
     if (!file.is_open()) {
-        std::cerr << "Error: Could not open random_graphs.txt\n";
+        // std::cerr << "Error: Could not open random_graphs.txt\n";
         return 1;
     }
 
@@ -189,7 +189,7 @@ int main(int argc, char* argv[]) {
         std::vector<std::vector<int>> graph = read_graph(file);
         if (graph.empty()) break;
         
-        std::cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
+        // std::cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
         
         BFS_GPU(graph, 0, branching_factor);
         BFS_GPU(graph, graph.size() / 2, branching_factor);
@@ -203,11 +203,11 @@ int main(int argc, char* argv[]) {
     auto total_end_time = std::chrono::high_resolution_clock::now();
     auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(total_end_time - total_start_time);
     
-    std::cout << "\nTotal Statistics:\n";
-    std::cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
-    std::cout << "Graphs processed: " << graph_number - 1 << "\n";
-    std::cout << "Total searches performed: " << total_searches << "\n";
-    std::cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
+    // std::cout << "\nTotal Statistics:\n";
+    // std::cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
+    // std::cout << "Graphs processed: " << graph_number - 1 << "\n";
+    // std::cout << "Total searches performed: " << total_searches << "\n";
+    // std::cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
 
     return 0;
 }

@@ -50,10 +50,10 @@ void BFS(const vector<vector<int>>& graph, int source) {
     auto end_time = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(end_time - start_time);
     
-    cout << "BFS from node " << source << " - "
-         << "Time: " << duration.count() / 1000.0 << "ms, "
-         << "Max depth: " << max_depth << ", "
-         << "Visited: " << nodes_visited << "/" << n << " nodes\n";
+    // cout << "BFS from node " << source << " - "
+    //      << "Time: " << duration.count() / 1000.0 << "ms, "
+    //      << "Max depth: " << max_depth << ", "
+    //      << "Visited: " << nodes_visited << "/" << n << " nodes\n";
 }
 
 vector<vector<int>> read_graph(ifstream& file) {
@@ -84,7 +84,7 @@ int main() {
     
     ifstream file("random_graphs.txt");
     if (!file.is_open()) {
-        cerr << "Error: Could not open random_graphs.txt\n";
+        // cerr << "Error: Could not open random_graphs.txt\n";
         return 1;
     }
 
@@ -99,7 +99,7 @@ int main() {
         vector<vector<int>> graph = read_graph(file);
         if (graph.empty()) break;
         
-        cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
+        // cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
         
         BFS(graph, 0);
         BFS(graph, graph.size() / 2);
@@ -113,11 +113,11 @@ int main() {
     auto total_end_time = high_resolution_clock::now();
     auto total_duration = duration_cast<microseconds>(total_end_time - total_start_time);
     
-    cout << "\nTotal Statistics:\n";
-    cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
-    cout << "Graphs processed: " << graph_number - 1 << "\n";
-    cout << "Total searches performed: " << total_searches << "\n";
-    cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
+    // cout << "\nTotal Statistics:\n";
+    // cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
+    // cout << "Graphs processed: " << graph_number - 1 << "\n";
+    // cout << "Total searches performed: " << total_searches << "\n";
+    // cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
 
     return 0;
 }
