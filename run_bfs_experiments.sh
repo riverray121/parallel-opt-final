@@ -7,7 +7,7 @@ nvcc -O3 generate_graphs_bf100.cu -o generate_graphs
 # Compile both BFS implementations
 echo "Compiling BFS implementations..."
 nvcc -O3 bfs_gpu1.cu -o bfs_gpu1
-g++ -O3 bfs_cpu.cpp -o bfs_cpu
+nvcc -O3 bfs.cu -o bfs_cpu
 
 # Generate the graphs
 echo "Generating graphs..."
