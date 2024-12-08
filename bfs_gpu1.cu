@@ -8,8 +8,6 @@
 #include <chrono>
 #include <cuda_runtime.h>
 
-using namespace std;
-
 // CUDA kernel for parallel neighbor processing
 __global__ void process_level_kernel(
     int* d_adjacency_list,
@@ -38,14 +36,14 @@ __global__ void process_level_kernel(
     }
 }
 
-void BFS_GPU(const vector<vector<int>>& graph, int source) {
-    auto start_time = high_resolution_clock::now();
+void BFS_GPU(const std::vector<std::vector<int>>& graph, int source) {
+    auto start_time = std::chrono::high_resolution_clock::now();
     
     int n = graph.size();
     
     // Convert graph to CSR format
-    vector<int> adjacency_list;
-    vector<int> adjacency_offsets(n + 1, 0);
+    std::vector<int> adjacency_list;
+    std::vector<int> adjacency_offsets(n + 1, 0);
     
     for (int i = 0; i < n; i++) {
         adjacency_offsets[i + 1] = adjacency_offsets[i] + graph[i].size();
@@ -68,9 +66,9 @@ void BFS_GPU(const vector<vector<int>>& graph, int source) {
     cudaMalloc(&d_new_frontier_size, sizeof(int));
 
     // Initialize host arrays
-    vector<int> distances(n, INT_MAX);
+    std::vector<int> distances(n, INT_MAX);
     distances[source] = 0;
-    vector<int> frontier = {source};
+    std::vector<int> frontier = {source};
     int frontier_size = 1;
     int new_frontier_size = 0;
     
@@ -129,26 +127,26 @@ void BFS_GPU(const vector<vector<int>>& graph, int source) {
     cudaFree(d_frontier_size);
     cudaFree(d_new_frontier_size);
 
-    auto end_time = high_resolution_clock::now();
-    auto duration = duration_cast<microseconds>(end_time - start_time);
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     
-    cout << "GPU BFS from node " << source << " - "
+    std::cout << "GPU BFS from node " << source << " - "
          << "Time: " << duration.count() / 1000.0 << "ms, "
          << "Max depth: " << max_depth << ", "
          << "Visited: " << nodes_visited << "/" << n << " nodes\n";
 }
 
-vector<vector<int>> read_graph(ifstream& file) {
-    string line;
-    getline(file, line);
+std::vector<std::vector<int>> read_graph(std::ifstream& file) {
+    std::string line;
+    std::getline(file, line);
     int n = std::stoi(line);
     
-    vector<vector<int>> graph(n);
+    std::vector<std::vector<int>> graph(n);
     
     for (int i = 0; i < n; i++) {
-        getline(file, line);
-        istringstream iss(line);
-        string vertex;
+        std::getline(file, line);
+        std::istringstream iss(line);
+        std::string vertex;
         iss >> vertex;
         
         int neighbor;
@@ -157,16 +155,16 @@ vector<vector<int>> read_graph(ifstream& file) {
         }
     }
     
-    getline(file, line);
+    std::getline(file, line);
     return graph;
 }
 
 int main() {
-    auto total_start_time = high_resolution_clock::now();
+    auto total_start_time = std::chrono::high_resolution_clock::now();
     
-    ifstream file("random_graphs.txt");
+    std::ifstream file("random_graphs.txt");
     if (!file.is_open()) {
-        cerr << "Error: Could not open random_graphs.txt\n";
+        std::cerr << "Error: Could not open random_graphs.txt\n";
         return 1;
     }
 
@@ -174,14 +172,14 @@ int main() {
     int total_searches = 0;
     
     while (!file.eof()) {
-        string peek;
-        if (!getline(file, peek)) break;
+        std::string peek;
+        if (!std::getline(file, peek)) break;
         file.seekg(-peek.length()-1, std::ios::cur);
         
-        vector<vector<int>> graph = read_graph(file);
+        std::vector<std::vector<int>> graph = read_graph(file);
         if (graph.empty()) break;
         
-        cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
+        std::cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
         
         BFS_GPU(graph, 0);
         BFS_GPU(graph, graph.size() / 2);
@@ -192,14 +190,14 @@ int main() {
 
     file.close();
     
-    auto total_end_time = high_resolution_clock::now();
-    auto total_duration = duration_cast<microseconds>(total_end_time - total_start_time);
+    auto total_end_time = std::chrono::high_resolution_clock::now();
+    auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(total_end_time - total_start_time);
     
-    cout << "\nTotal Statistics:\n";
-    cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
-    cout << "Graphs processed: " << graph_number - 1 << "\n";
-    cout << "Total searches performed: " << total_searches << "\n";
-    cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
+    std::cout << "\nTotal Statistics:\n";
+    std::cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
+    std::cout << "Graphs processed: " << graph_number - 1 << "\n";
+    std::cout << "Total searches performed: " << total_searches << "\n";
+    std::cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
 
     return 0;
 }
