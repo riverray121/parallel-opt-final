@@ -19,7 +19,7 @@ using std::chrono::high_resolution_clock;
 using std::chrono::duration_cast;
 using std::chrono::microseconds;
 
-void BFS(const vector<vector<int>>& graph, int source) {
+void BFS(const vector<vector<int>>& graph, int source, int branching_factor) {
     auto start_time = high_resolution_clock::now();
     
     int n = graph.size();
@@ -50,10 +50,13 @@ void BFS(const vector<vector<int>>& graph, int source) {
     auto end_time = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(end_time - start_time);
     
-    // cout << "BFS from node " << source << " - "
-    //      << "Time: " << duration.count() / 1000.0 << "ms, "
-    //      << "Max depth: " << max_depth << ", "
-    //      << "Visited: " << nodes_visited << "/" << n << " nodes\n";
+    printf("%lu,%d,CPU,%d,%.3f,%d,%d\n", 
+           graph.size(),          // graph_size
+           branching_factor,      // branching_factor
+           source,               // source_node
+           duration.count() / 1000.0,  // time_ms
+           max_depth,            // max_depth
+           nodes_visited);       // nodes_visited
 }
 
 vector<vector<int>> read_graph(ifstream& file) {
@@ -79,7 +82,13 @@ vector<vector<int>> read_graph(ifstream& file) {
     return graph;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        return 1;
+    }
+    
+    const int branching_factor = std::stoi(argv[1]);
+    
     auto total_start_time = high_resolution_clock::now();
     
     ifstream file("random_graphs.txt");
@@ -99,10 +108,8 @@ int main() {
         vector<vector<int>> graph = read_graph(file);
         if (graph.empty()) break;
         
-        // cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
-        
-        BFS(graph, 0);
-        BFS(graph, graph.size() / 2);
+        BFS(graph, 0, branching_factor);
+        BFS(graph, graph.size() / 2, branching_factor);
         
         graph_number++;
         total_searches += 2;
