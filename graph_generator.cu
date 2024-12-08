@@ -4,7 +4,6 @@
 #include <ctime>
 #include <fstream>
 
-// Use specific using declarations for frequently used components
 using std::vector;
 using std::cout;
 using std::cerr;
@@ -13,36 +12,54 @@ using std::string;
 using std::ofstream;
 using std::ios;
 
-// Generate a random graph with n vertices and approximately edge_density percentage of possible edges
-vector<vector<int>> generate_random_graph(int n, double edge_density) {
+vector<vector<int>> generate_deep_graph(int n) {
     vector<vector<int>> graph(n);
     
-    // Initialize random number generator
     std::random_device rd;
     std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dist(1, 3); // Each node connects to 1-3 nodes ahead
     std::uniform_real_distribution<> prob(0.0, 1.0);
-    std::uniform_int_distribution<> vertex_dist(0, n-1);
     
-    // For each pair of vertices
-    for (int i = 0; i < n; i++) {
-        for (int j = i + 1; j < n; j++) {
-            // Add edge with probability edge_density
-            if (prob(gen) < edge_density) {
-                graph[i].push_back(j);
-                graph[j].push_back(i); // Since it's an undirected graph
+    // First ensure a main deep path exists
+    for (int i = 0; i < n-1; i++) {
+        int next = i + 1;
+        graph[i].push_back(next);
+        graph[next].push_back(i);
+    }
+    
+    // Then add some branching paths
+    for (int i = 0; i < n-3; i++) {
+        int num_branches = dist(gen);
+        for (int b = 0; b < num_branches; b++) {
+            if (prob(gen) < 0.3) { // 30% chance to add a branch
+                int jump = dist(gen) + 1; // Connect to a node 2-4 steps ahead
+                if (i + jump < n) {
+                    graph[i].push_back(i + jump);
+                    graph[i + jump].push_back(i);
+                }
             }
+        }
+    }
+    
+    // Add a few random long-range connections
+    int num_long_range = n / 50; // Add more long range connections for larger graphs
+    std::uniform_int_distribution<> long_range(0, n-1);
+    for (int i = 0; i < num_long_range; i++) {
+        int from = long_range(gen);
+        int to = long_range(gen);
+        if (from != to && prob(gen) < 0.1) { // 10% chance for long range connection
+            graph[from].push_back(to);
+            graph[to].push_back(from);
         }
     }
     
     return graph;
 }
 
-// Save graph to file
 void save_graph_to_file(const vector<vector<int>>& graph, const string& filename) {
     ofstream out(filename, ios::app);
-    out << graph.size() << "\n"; // First line contains number of vertices
+    out << graph.size() << "\n";
     
-    // Write each adjacency list
     for (size_t i = 0; i < graph.size(); i++) {
         out << i << ": ";
         for (int neighbor : graph[i]) {
@@ -50,32 +67,25 @@ void save_graph_to_file(const vector<vector<int>>& graph, const string& filename
         }
         out << "\n";
     }
-    out << "\n"; // Empty line between graphs
+    out << "\n";
     out.close();
 }
 
 int main() {
-    // Seed for reproducibility
     srand(time(0));
     
-    // Clear the output file
     ofstream out("random_graphs.txt", ios::trunc);
     out.close();
     
-    // Generate 10 larger graphs
+    // Generate 10 graphs
     for (int i = 0; i < 10; i++) {
-        // Random size between 100 and 1000 vertices
-        int size = rand() % 901 + 100;  // 901 = (1000-100+1)
+        // Random size between 500 and 2000 vertices
+        int size = rand() % 1501 + 500;
         
-        // Random edge density between 0.01 and 0.1 (sparser for larger graphs)
-        double density = (rand() % 9 + 1) / 100.0;
+        vector<vector<int>> graph = generate_deep_graph(size);
         
-        // Generate and save the graph
-        vector<vector<int>> graph = generate_random_graph(size, density);
+        cout << "Generated graph " << i + 1 << " with " << size << " vertices\n";
         
-        cout << "Generated graph " << i + 1 << " with " << size << " vertices"
-             << " and density " << density << "\n";
-             
         save_graph_to_file(graph, "random_graphs.txt");
     }
     
