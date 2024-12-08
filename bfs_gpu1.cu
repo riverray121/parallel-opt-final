@@ -36,7 +36,7 @@ __global__ void process_level_kernel(
     }
 }
 
-void BFS_GPU(const std::vector<std::vector<int>>& graph, int source) {
+void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
     auto start_time = std::chrono::high_resolution_clock::now();
     
     int n = graph.size();
@@ -130,10 +130,13 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source) {
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     
-    std::cout << "GPU BFS from node " << source << " - "
-         << "Time: " << duration.count() / 1000.0 << "ms, "
-         << "Max depth: " << max_depth << ", "
-         << "Visited: " << nodes_visited << "/" << n << " nodes\n";
+    printf("%d,%d,GPU,%d,%.3f,%d,%d\n", 
+           graph.size(),          // graph_size
+           branching_factor,      // branching_factor
+           source,               // source_node
+           duration.count() / 1000.0,  // time_ms
+           max_depth,            // max_depth
+           nodes_visited);       // nodes_visited
 }
 
 std::vector<std::vector<int>> read_graph(std::ifstream& file) {
@@ -159,7 +162,14 @@ std::vector<std::vector<int>> read_graph(std::ifstream& file) {
     return graph;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " <branching_factor>\n";
+        return 1;
+    }
+    
+    const int branching_factor = std::stoi(argv[1]);
+    
     auto total_start_time = std::chrono::high_resolution_clock::now();
     
     std::ifstream file("random_graphs.txt");
@@ -181,8 +191,8 @@ int main() {
         
         std::cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
         
-        BFS_GPU(graph, 0);
-        BFS_GPU(graph, graph.size() / 2);
+        BFS_GPU(graph, 0, branching_factor);
+        BFS_GPU(graph, graph.size() / 2, branching_factor);
         
         graph_number++;
         total_searches += 2;

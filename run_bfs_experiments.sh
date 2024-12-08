@@ -1,23 +1,29 @@
 #!/bin/bash
 
-# Compile the graph generator
-echo "Compiling graph generator..."
-nvcc -O3 generate_graphs_bf100.cu -o generate_graphs
+# Create results directory if it doesn't exist
+mkdir -p results
 
-# Compile both BFS implementations
-echo "Compiling BFS implementations..."
+# Create CSV file with headers
+echo "graph_size,branching_factor,algorithm,source_node,time_ms,max_depth,nodes_visited" > results/bfs_results.csv
+
+# Compile all implementations
+echo "Compiling programs..."
+nvcc -O3 generate_graphs_bf1000.cu -o generate_graphs
 nvcc -O3 bfs_gpu1.cu -o bfs_gpu1
 nvcc -O3 bfs.cu -o bfs_cpu
 
-# Generate the graphs
-echo "Generating graphs..."
-./generate_graphs
+# Loop through branching factors (10, 30, 90, 270)
+for bf in 10 30 90 270; do
+    echo "Testing with branching factor: $bf"
+    
+    # Generate graphs with current branching factor
+    ./generate_graphs $bf
+    
+    # Run CPU version
+    ./bfs_cpu $bf >> results/bfs_results.csv
+    
+    # Run GPU version
+    ./bfs_gpu1 $bf >> results/bfs_results.csv
+done
 
-# Run both BFS implementations
-echo "Running BFS experiments..."
-echo -e "\nCPU BFS Results:"
-./bfs_cpu
-echo -e "\nGPU BFS Results:"
-./bfs_gpu1
-
-echo "Experiments completed!" 
+echo "Experiments completed! Results saved in results/bfs_results.csv" 
