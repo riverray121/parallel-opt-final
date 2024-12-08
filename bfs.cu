@@ -5,9 +5,8 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <chrono>  // Add this for timing
+#include <chrono>
 
-// Use specific using declarations for frequently used components
 using std::vector;
 using std::queue;
 using std::string;
@@ -21,7 +20,7 @@ using std::chrono::duration_cast;
 using std::chrono::microseconds;
 
 void BFS(const vector<vector<int>>& graph, int source) {
-    auto start_time = high_resolution_clock::now();  // Start timing
+    auto start_time = high_resolution_clock::now();
     
     int n = graph.size();
     vector<int> dist(n, INT_MAX);
@@ -29,12 +28,10 @@ void BFS(const vector<vector<int>>& graph, int source) {
     
     int max_depth = 0;
     int nodes_visited = 0;
-    vector<int> nodes_at_depth(n, 0);
 
     dist[source] = 0;
     Q.push(source);
     nodes_visited++;
-    nodes_at_depth[0] = 1;
 
     while (!Q.empty()) {
         int current = Q.front();
@@ -45,31 +42,22 @@ void BFS(const vector<vector<int>>& graph, int source) {
                 dist[neighbor] = dist[current] + 1;
                 max_depth = std::max(max_depth, dist[neighbor]);
                 nodes_visited++;
-                nodes_at_depth[dist[neighbor]]++;
                 Q.push(neighbor);
             }
         }
     }
 
-    auto end_time = high_resolution_clock::now();  // End timing
+    auto end_time = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(end_time - start_time);
     
-    // Print detailed statistics
-    cout << "BFS Statistics:\n";
-    cout << "Time taken: " << duration.count() / 1000.0 << " milliseconds\n";
-    cout << "Maximum depth reached: " << max_depth << "\n";
-    cout << "Total nodes visited: " << nodes_visited << " out of " << n << "\n";
-    cout << "Nodes at each depth:\n";
-    for (int d = 0; d <= max_depth; d++) {
-        if (nodes_at_depth[d] > 0) {
-            cout << "Depth " << d << ": " << nodes_at_depth[d] << " nodes\n";
-        }
-    }
+    cout << "BFS from node " << source << " - "
+         << "Time: " << duration.count() / 1000.0 << "ms, "
+         << "Max depth: " << max_depth << ", "
+         << "Visited: " << nodes_visited << "/" << n << " nodes\n";
 }
 
 vector<vector<int>> read_graph(ifstream& file) {
     string line;
-    
     getline(file, line);
     int n = std::stoi(line);
     
@@ -78,7 +66,6 @@ vector<vector<int>> read_graph(ifstream& file) {
     for (int i = 0; i < n; i++) {
         getline(file, line);
         istringstream iss(line);
-        
         string vertex;
         iss >> vertex;
         
@@ -89,11 +76,12 @@ vector<vector<int>> read_graph(ifstream& file) {
     }
     
     getline(file, line);
-    
     return graph;
 }
 
 int main() {
+    auto total_start_time = high_resolution_clock::now();
+    
     ifstream file("random_graphs.txt");
     if (!file.is_open()) {
         cerr << "Error: Could not open random_graphs.txt\n";
@@ -101,28 +89,35 @@ int main() {
     }
 
     int graph_number = 1;
+    int total_searches = 0;
+    
     while (!file.eof()) {
         string peek;
-        if (!getline(file, peek)) {
-            break;
-        }
+        if (!getline(file, peek)) break;
         file.seekg(-peek.length()-1, std::ios::cur);
         
         vector<vector<int>> graph = read_graph(file);
         if (graph.empty()) break;
         
-        cout << "\n=== Graph " << graph_number << " (Size: " << graph.size() << ") ===\n";
+        cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
         
-        cout << "\nStarting from vertex 0:\n";
         BFS(graph, 0);
-        
-        int mid_vertex = graph.size() / 2;
-        cout << "\nStarting from vertex " << mid_vertex << ":\n";
-        BFS(graph, mid_vertex);
+        BFS(graph, graph.size() / 2);
         
         graph_number++;
+        total_searches += 2;
     }
 
     file.close();
+    
+    auto total_end_time = high_resolution_clock::now();
+    auto total_duration = duration_cast<microseconds>(total_end_time - total_start_time);
+    
+    cout << "\nTotal Statistics:\n";
+    cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
+    cout << "Graphs processed: " << graph_number - 1 << "\n";
+    cout << "Total searches performed: " << total_searches << "\n";
+    cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
+
     return 0;
 }
