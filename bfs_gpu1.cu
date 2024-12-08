@@ -130,7 +130,7 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     
-    printf("%d,%d,GPU,%d,%.3f,%d,%d\n", 
+    printf("%lu,%d,GPU,%d,%.3f,%d,%d\n", 
            graph.size(),          // graph_size
            branching_factor,      // branching_factor
            source,               // source_node
