@@ -45,7 +45,7 @@ int main() {
     
     // Generate graphs of different sizes
     std::vector<int> sizes = {1000, 5000, 10000, 50000, 100000};
-    const int branching_factor = 100;
+    const int branching_factor = 1000;
     
     for (int size : sizes) {
         generate_graph(file, size, branching_factor);
