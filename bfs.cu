@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <chrono>  // Add this for timing
 
 // Use specific using declarations for frequently used components
 using std::vector;
@@ -15,15 +16,20 @@ using std::cerr;
 using std::endl;
 using std::ifstream;
 using std::istringstream;
+using std::chrono::high_resolution_clock;
+using std::chrono::duration_cast;
+using std::chrono::microseconds;
 
 void BFS(const vector<vector<int>>& graph, int source) {
+    auto start_time = high_resolution_clock::now();  // Start timing
+    
     int n = graph.size();
     vector<int> dist(n, INT_MAX);
     queue<int> Q;
     
     int max_depth = 0;
     int nodes_visited = 0;
-    vector<int> nodes_at_depth(n, 0);  // Count nodes at each depth
+    vector<int> nodes_at_depth(n, 0);
 
     dist[source] = 0;
     Q.push(source);
@@ -45,8 +51,12 @@ void BFS(const vector<vector<int>>& graph, int source) {
         }
     }
 
+    auto end_time = high_resolution_clock::now();  // End timing
+    auto duration = duration_cast<microseconds>(end_time - start_time);
+    
     // Print detailed statistics
     cout << "BFS Statistics:\n";
+    cout << "Time taken: " << duration.count() / 1000.0 << " milliseconds\n";
     cout << "Maximum depth reached: " << max_depth << "\n";
     cout << "Total nodes visited: " << nodes_visited << " out of " << n << "\n";
     cout << "Nodes at each depth:\n";
