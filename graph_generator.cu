@@ -62,13 +62,13 @@ int main() {
     ofstream out("random_graphs.txt", ios::trunc);
     out.close();
     
-    // Generate 20 random graphs
-    for (int i = 0; i < 20; i++) {
-        // Random size between 5 and 50 vertices
-        int size = rand() % 46 + 5;
+    // Generate 10 larger graphs
+    for (int i = 0; i < 10; i++) {
+        // Random size between 100 and 1000 vertices
+        int size = rand() % 901 + 100;  // 901 = (1000-100+1)
         
-        // Random edge density between 0.1 and 0.5
-        double density = (rand() % 40 + 10) / 100.0;
+        // Random edge density between 0.01 and 0.1 (sparser for larger graphs)
+        double density = (rand() % 9 + 1) / 100.0;
         
         // Generate and save the graph
         vector<vector<int>> graph = generate_random_graph(size, density);
