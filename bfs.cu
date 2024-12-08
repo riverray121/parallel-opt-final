@@ -2,11 +2,16 @@
 #include <vector>
 #include <queue>
 #include <climits>
+#include <fstream>
+#include <sstream>
+#include <string>
 
-void BFS(const std::vector<std::vector<int>>& graph, int source) {
+using namespace std;
+
+void BFS(const vector<vector<int>>& graph, int source) {
     int n = graph.size();
-    std::vector<int> dist(n, INT_MAX);
-    std::queue<int> Q;
+    vector<int> dist(n, INT_MAX);
+    queue<int> Q;
 
     dist[source] = 0;
     Q.push(source);
@@ -24,41 +29,78 @@ void BFS(const std::vector<std::vector<int>>& graph, int source) {
     }
 
     // Print distances from the source
-    std::cout << "Distances from node " << source << ":\n";
+    cout << "Distances from node " << source << ":\n";
     for (int i = 0; i < n; ++i) {
         if (dist[i] == INT_MAX) {
-            std::cout << "Node " << i << ": Unreachable\n";
+            cout << "Node " << i << ": Unreachable\n";
         } else {
-            std::cout << "Node " << i << ": " << dist[i] << "\n";
+            cout << "Node " << i << ": " << dist[i] << "\n";
         }
     }
 }
 
+// Function to read a graph from the input stream
+vector<vector<int>> read_graph(ifstream& file) {
+    string line;
+    
+    // Read number of vertices
+    getline(file, line);
+    int n = stoi(line);
+    
+    vector<vector<int>> graph(n);
+    
+    // Read each adjacency list
+    for (int i = 0; i < n; i++) {
+        getline(file, line);
+        istringstream iss(line);
+        
+        string vertex;
+        iss >> vertex; // Skip the vertex number and colon
+        
+        int neighbor;
+        while (iss >> neighbor) {
+            graph[i].push_back(neighbor);
+        }
+    }
+    
+    // Skip the empty line between graphs
+    getline(file, line);
+    
+    return graph;
+}
+
 int main() {
-    // Example graphs
-    std::vector<std::vector<int>> graph1 = {
-        {1, 2},      // Neighbors of node 0
-        {0, 3, 4},   // Neighbors of node 1
-        {0, 4},      // Neighbors of node 2
-        {1, 5},      // Neighbors of node 3
-        {1, 2},      // Neighbors of node 4
-        {3}          // Neighbors of node 5
-    };
+    ifstream file("random_graphs.txt");
+    if (!file.is_open()) {
+        cerr << "Error: Could not open random_graphs.txt\n";
+        return 1;
+    }
 
-    std::vector<std::vector<int>> graph2 = {
-        {1},         // Neighbors of node 0
-        {0, 2, 3},   // Neighbors of node 1
-        {1, 4},      // Neighbors of node 2
-        {1, 5},      // Neighbors of node 3
-        {2},         // Neighbors of node 4
-        {3}          // Neighbors of node 5
-    };
+    int graph_number = 1;
+    while (!file.eof()) {
+        // Try to read the next graph
+        string peek;
+        if (!getline(file, peek)) {
+            break;  // Exit if we can't read anymore
+        }
+        file.seekg(-peek.length()-1, ios::cur); // Go back to start of graph
+        
+        vector<vector<int>> graph = read_graph(file);
+        if (graph.empty()) break;  // Exit if we got an empty graph
+        
+        cout << "\n=== Graph " << graph_number << " (Size: " << graph.size() << ") ===\n";
+        
+        // Run BFS from vertex 0 and from a middle vertex
+        cout << "\nStarting from vertex 0:\n";
+        BFS(graph, 0);
+        
+        int mid_vertex = graph.size() / 2;
+        cout << "\nStarting from vertex " << mid_vertex << ":\n";
+        BFS(graph, mid_vertex);
+        
+        graph_number++;
+    }
 
-    std::cout << "Graph 1:\n";
-    BFS(graph1, 0);
-
-    std::cout << "\nGraph 2:\n";
-    BFS(graph2, 1);
-
+    file.close();
     return 0;
 }
