@@ -17,39 +17,54 @@ vector<vector<int>> generate_deep_graph(int n) {
     
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(1, 3); // Each node connects to 1-3 nodes ahead
+    std::uniform_int_distribution<> dist(1, 2);  // Reduced to 1-2 connections
     std::uniform_real_distribution<> prob(0.0, 1.0);
     
-    // First ensure a main deep path exists
-    for (int i = 0; i < n-1; i++) {
-        int next = i + 1;
-        graph[i].push_back(next);
-        graph[next].push_back(i);
+    // Create several separate long paths
+    int num_paths = n / 100;  // More separate paths for larger graphs
+    vector<int> path_starts;
+    
+    for (int p = 0; p < num_paths; p++) {
+        int start = (p * n) / num_paths;
+        path_starts.push_back(start);
+        
+        // Create a winding path from this start point
+        int current = start;
+        int remaining_length = (n / num_paths) - 1;
+        
+        while (remaining_length > 0 && current < n-1) {
+            int next = current + 1;
+            graph[current].push_back(next);
+            graph[next].push_back(current);
+            current = next;
+            remaining_length--;
+        }
     }
     
-    // Then add some branching paths
-    for (int i = 0; i < n-3; i++) {
-        int num_branches = dist(gen);
-        for (int b = 0; b < num_branches; b++) {
-            if (prob(gen) < 0.3) { // 30% chance to add a branch
-                int jump = dist(gen) + 1; // Connect to a node 2-4 steps ahead
-                if (i + jump < n) {
-                    graph[i].push_back(i + jump);
-                    graph[i + jump].push_back(i);
-                }
+    // Add sparse connections between paths
+    for (int i = 0; i < n; i++) {
+        if (prob(gen) < 0.05) {  // Only 5% chance to add cross-path connection
+            int jump = dist(gen) * 100;  // Make jumps between paths larger
+            if (i + jump < n) {
+                graph[i].push_back(i + jump);
+                graph[i + jump].push_back(i);
             }
         }
     }
     
-    // Add a few random long-range connections
-    int num_long_range = n / 50; // Add more long range connections for larger graphs
-    std::uniform_int_distribution<> long_range(0, n-1);
-    for (int i = 0; i < num_long_range; i++) {
-        int from = long_range(gen);
-        int to = long_range(gen);
-        if (from != to && prob(gen) < 0.1) { // 10% chance for long range connection
-            graph[from].push_back(to);
-            graph[to].push_back(from);
+    // Add some dead ends and branches
+    for (int i = 0; i < n; i++) {
+        if (prob(gen) < 0.1) {  // 10% chance to add a branch
+            int branch_length = dist(gen);
+            int current = i;
+            
+            // Create a branch that leads to nowhere
+            for (int j = 0; j < branch_length && current < n-1; j++) {
+                int next = current + 1;
+                graph[current].push_back(next);
+                graph[next].push_back(current);
+                current = next;
+            }
         }
     }
     

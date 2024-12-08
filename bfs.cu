@@ -20,9 +20,15 @@ void BFS(const vector<vector<int>>& graph, int source) {
     int n = graph.size();
     vector<int> dist(n, INT_MAX);
     queue<int> Q;
+    
+    int max_depth = 0;
+    int nodes_visited = 0;
+    vector<int> nodes_at_depth(n, 0);  // Count nodes at each depth
 
     dist[source] = 0;
     Q.push(source);
+    nodes_visited++;
+    nodes_at_depth[0] = 1;
 
     while (!Q.empty()) {
         int current = Q.front();
@@ -31,17 +37,22 @@ void BFS(const vector<vector<int>>& graph, int source) {
         for (int neighbor : graph[current]) {
             if (dist[neighbor] == INT_MAX) {
                 dist[neighbor] = dist[current] + 1;
+                max_depth = std::max(max_depth, dist[neighbor]);
+                nodes_visited++;
+                nodes_at_depth[dist[neighbor]]++;
                 Q.push(neighbor);
             }
         }
     }
 
-    cout << "Distances from node " << source << ":\n";
-    for (int i = 0; i < n; ++i) {
-        if (dist[i] == INT_MAX) {
-            cout << "Node " << i << ": Unreachable\n";
-        } else {
-            cout << "Node " << i << ": " << dist[i] << "\n";
+    // Print detailed statistics
+    cout << "BFS Statistics:\n";
+    cout << "Maximum depth reached: " << max_depth << "\n";
+    cout << "Total nodes visited: " << nodes_visited << " out of " << n << "\n";
+    cout << "Nodes at each depth:\n";
+    for (int d = 0; d <= max_depth; d++) {
+        if (nodes_at_depth[d] > 0) {
+            cout << "Depth " << d << ": " << nodes_at_depth[d] << " nodes\n";
         }
     }
 }
