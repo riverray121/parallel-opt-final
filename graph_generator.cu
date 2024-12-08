@@ -4,17 +4,24 @@
 #include <ctime>
 #include <fstream>
 
-using namespace std;
+// Use specific using declarations for frequently used components
+using std::vector;
+using std::cout;
+using std::cerr;
+using std::endl;
+using std::string;
+using std::ofstream;
+using std::ios;
 
 // Generate a random graph with n vertices and approximately edge_density percentage of possible edges
 vector<vector<int>> generate_random_graph(int n, double edge_density) {
     vector<vector<int>> graph(n);
     
     // Initialize random number generator
-    random_device rd;
-    mt19937 gen(rd());
-    uniform_real_distribution<> prob(0.0, 1.0);
-    uniform_int_distribution<> vertex_dist(0, n-1);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> prob(0.0, 1.0);
+    std::uniform_int_distribution<> vertex_dist(0, n-1);
     
     // For each pair of vertices
     for (int i = 0; i < n; i++) {
