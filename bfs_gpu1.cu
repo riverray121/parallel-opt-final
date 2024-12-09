@@ -68,7 +68,10 @@ __global__ void process_level_kernel(
         
         for (int i = start; i < end && local_count < max_neighbors; i++) {
             int neighbor = d_adjacency_list[i];
-            if (atomicCAS(&d_distances[neighbor], INT_MAX, current_depth + 1) == INT_MAX) {
+            // Simple distance check and update, no atomic needed due to benign race condition 
+            // as described in the NVIDIA paper
+            if (d_distances[neighbor] == INT_MAX) {
+                d_distances[neighbor] = current_depth + 1;
                 local_indices[local_count++] = neighbor;
             }
         }
