@@ -147,10 +147,23 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     cudaMalloc(&d_local_sizes, max_threads * sizeof(int));
     cudaMalloc(&d_local_offsets, max_threads * sizeof(int));
     
+    // Keep these arrays on GPU throughout the entire BFS
+    int *d_frontier_size, *d_new_frontier_size;
+    cudaMalloc(&d_frontier_size, sizeof(int));
+    cudaMalloc(&d_new_frontier_size, sizeof(int));
+    
+    // Initialize directly on device instead of copying
+    cudaMemset(d_frontier_size, 0, sizeof(int));
+    cudaMemset(d_new_frontier_size, 0, sizeof(int));
+    
+    // Initialize first frontier directly on device
+    cudaMemset(d_frontier, 0, n * sizeof(int));
+    int init_frontier_size = 1;
+    cudaMemcpy(d_frontier_size, &init_frontier_size, sizeof(int), cudaMemcpyHostToDevice);
+    
     // BFS iterations
-    while (frontier_size > 0) {
-        cudaMemcpy(d_frontier, frontier.data(), frontier_size * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
+    bool continue_bfs = true;
+    while (continue_bfs) {
         cudaMemset(d_new_frontier_size, 0, sizeof(int));
         
         // Launch kernel with shared memory
@@ -172,30 +185,31 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
             max_neighbors
         );
         
-        // Compute prefix sum for local offsets
         prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(
             d_local_sizes,
             d_local_offsets,
             max_threads
         );
+
+        // Swap frontier pointers instead of copying
+        int* temp = d_frontier;
+        d_frontier = d_new_frontier;
+        d_new_frontier = temp;
         
-        // Get new frontier size
-        cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
+        // Copy only the size to check termination
+        int current_frontier_size;
+        cudaMemcpy(&current_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
+        continue_bfs = (current_frontier_size > 0);
         
-        // Get new frontier
-        frontier.resize(new_frontier_size);
-        cudaMemcpy(frontier.data(), d_new_frontier, new_frontier_size * sizeof(int), cudaMemcpyDeviceToHost);
-        
-        frontier_size = new_frontier_size;
-        new_frontier_size = 0;
-        
-        current_depth++;
-        if (frontier_size > 0) {
-            max_depth = current_depth;
-            nodes_visited += frontier_size;
+        if (continue_bfs) {
+            nodes_visited += current_frontier_size;
+            max_depth = ++current_depth;
         }
     }
 
+    // Only copy distances back at the very end if needed
+    // cudaMemcpy(distances.data(), d_distances, n * sizeof(int), cudaMemcpyDeviceToHost);
+    
     // Clean up
     cudaFree(d_adjacency_list);
     cudaFree(d_adjacency_offsets);
