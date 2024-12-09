@@ -20,18 +20,21 @@ __global__ void process_level_kernel(
     int current_depth
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= *d_frontier_size) return;
+    int stride = blockDim.x * gridDim.x;  // Total number of threads
+    
+    // Process multiple nodes per thread using striding
+    for (int idx = tid; idx < *d_frontier_size; idx += stride) {
+        int current = d_frontier[idx];
+        int start = d_adjacency_offsets[current];
+        int end = d_adjacency_offsets[current + 1];
 
-    int current = d_frontier[tid];
-    int start = d_adjacency_offsets[current];
-    int end = d_adjacency_offsets[current + 1];
-
-    for (int i = start; i < end; i++) {
-        int neighbor = d_adjacency_list[i];
-        if (d_distances[neighbor] == INT_MAX) {
-            d_distances[neighbor] = current_depth + 1;
-            int idx = atomicAdd(d_new_frontier_size, 1);
-            d_new_frontier[idx] = neighbor;
+        for (int i = start; i < end; i++) {
+            int neighbor = d_adjacency_list[i];
+            if (d_distances[neighbor] == INT_MAX) {
+                d_distances[neighbor] = current_depth + 1;
+                int frontier_idx = atomicAdd(d_new_frontier_size, 1);
+                d_new_frontier[frontier_idx] = neighbor;
+            }
         }
     }
 }
