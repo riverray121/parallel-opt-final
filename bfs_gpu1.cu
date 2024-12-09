@@ -8,6 +8,12 @@
 #include <chrono>
 #include <cuda_runtime.h>
 
+// Add constants at global scope, right after includes
+const int MAX_THREADS_PER_BLOCK = 1024;
+const int MIN_THREADS_PER_BLOCK = 32;
+const int TARGET_THREADS_PER_NODE = 2;
+const int SMALL_FRONTIER_THRESHOLD = 64;
+
 // CUDA kernel for prefix sum
 __global__ void prefix_sum_kernel(int* d_input, int* d_output, int n) {
     extern __shared__ int temp[];
@@ -118,11 +124,6 @@ void processTinyFrontierCPU(
         }
     }
 }
-
-// Add these constants at the top
-const int MAX_THREADS_PER_BLOCK = 1024;  // Maximum threads per block for most GPUs
-const int MIN_THREADS_PER_BLOCK = 32;    // Minimum = warp size
-const int TARGET_THREADS_PER_NODE = 2;    // Adjust based on testing
 
 void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
     auto start_time = std::chrono::high_resolution_clock::now();
