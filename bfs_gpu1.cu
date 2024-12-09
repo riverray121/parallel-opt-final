@@ -114,15 +114,12 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     // Allocate device memory
     int *d_adjacency_list, *d_adjacency_offsets, *d_distances;
     int *d_frontier, *d_new_frontier;
-    int *d_frontier_size, *d_new_frontier_size;
     
     cudaMalloc(&d_adjacency_list, adjacency_list.size() * sizeof(int));
     cudaMalloc(&d_adjacency_offsets, (n + 1) * sizeof(int));
     cudaMalloc(&d_distances, n * sizeof(int));
     cudaMalloc(&d_frontier, n * sizeof(int));
     cudaMalloc(&d_new_frontier, n * sizeof(int));
-    cudaMalloc(&d_frontier_size, sizeof(int));
-    cudaMalloc(&d_new_frontier_size, sizeof(int));
 
     // Initialize host arrays
     std::vector<int> distances(n, INT_MAX);
