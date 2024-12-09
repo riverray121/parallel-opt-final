@@ -20,35 +20,26 @@ using std::chrono::high_resolution_clock;
 using std::chrono::duration_cast;
 using std::chrono::microseconds;
 
-#define CUDA_CHECK(call) { \
-    cudaError_t err = call; \
-    if (err != cudaSuccess) { \
-        fprintf(stderr, "CUDA error in %s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(err)); \
-        exit(EXIT_FAILURE); \
-    } \
-}
-
 __global__ void bfs_kernel(
     const int* adjacency_list,
-    const int* adjacency_offsets,
+    const int* adjacency_offset,
     int* distances,
     bool* frontier,
     bool* next_frontier,
-    int n,
-    int level
-) {
+    int n) {
+    
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n) return;
 
     if (frontier[tid]) {
         frontier[tid] = false;
-        int start = adjacency_offsets[tid];
-        int end = adjacency_offsets[tid + 1];
+        int start = adjacency_offset[tid];
+        int end = adjacency_offset[tid + 1];
         
         for (int i = start; i < end; i++) {
             int neighbor = adjacency_list[i];
             if (distances[neighbor] == INT_MAX) {
-                distances[neighbor] = level;
+                distances[neighbor] = distances[tid] + 1;
                 next_frontier[neighbor] = true;
             }
         }
@@ -60,81 +51,83 @@ void BFS_GPU(const vector<vector<int>>& graph, int source, int branching_factor)
     
     int n = graph.size();
     
+    // Convert graph to GPU-friendly format
     vector<int> adjacency_list;
-    vector<int> adjacency_offsets(n + 1, 0);
+    vector<int> adjacency_offset(n + 1, 0);
     
     for (int i = 0; i < n; i++) {
-        adjacency_offsets[i + 1] = adjacency_offsets[i] + graph[i].size();
+        adjacency_offset[i + 1] = adjacency_offset[i] + graph[i].size();
         adjacency_list.insert(adjacency_list.end(), graph[i].begin(), graph[i].end());
     }
     
-    int *d_adjacency_list, *d_adjacency_offsets, *d_distances;
+    // Allocate device memory
+    int *d_adjacency_list, *d_adjacency_offset, *d_distances;
     bool *d_frontier, *d_next_frontier;
     
-    CUDA_CHECK(cudaMalloc(&d_adjacency_list, adjacency_list.size() * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_adjacency_offsets, (n + 1) * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_distances, n * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_frontier, n * sizeof(bool)));
-    CUDA_CHECK(cudaMalloc(&d_next_frontier, n * sizeof(bool)));
+    cudaMalloc(&d_adjacency_list, adjacency_list.size() * sizeof(int));
+    cudaMalloc(&d_adjacency_offset, (n + 1) * sizeof(int));
+    cudaMalloc(&d_distances, n * sizeof(int));
+    cudaMalloc(&d_frontier, n * sizeof(bool));
+    cudaMalloc(&d_next_frontier, n * sizeof(bool));
     
-    vector<int> h_distances(n, INT_MAX);
-    vector<bool> h_frontier(n, false);
-    h_distances[source] = 0;
-    h_frontier[source] = true;
+    // Initialize host arrays
+    vector<int> distances(n, INT_MAX);
+    vector<bool> frontier(n, false);
+    distances[source] = 0;
+    frontier[source] = true;
     
-    CUDA_CHECK(cudaMemcpy(d_adjacency_list, adjacency_list.data(), adjacency_list.size() * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_adjacency_offsets, adjacency_offsets.data(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_distances, h_distances.data(), n * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_frontier, reinterpret_cast<const void*>(h_frontier.data()), n * sizeof(bool), cudaMemcpyHostToDevice));
+    // Copy data to device
+    cudaMemcpy(d_adjacency_list, adjacency_list.data(), 
+        adjacency_list.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_adjacency_offset, adjacency_offset.data(), 
+        (n + 1) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_distances, distances.data(), 
+        n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_frontier, frontier.data(), 
+        n * sizeof(bool), cudaMemcpyHostToDevice);
     
-    int level = 1;
+    // BFS iterations
+    int block_size = 256;
+    int num_blocks = (n + block_size - 1) / block_size;
+    bool has_frontier = true;
     int max_depth = 0;
     int nodes_visited = 1;
-    
-    const int BLOCK_SIZE = 256;
-    const int num_blocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    
-    bool continue_bfs;
-    vector<bool> h_next_frontier(n);
-    
-    do {
-        CUDA_CHECK(cudaMemset(d_next_frontier, 0, n * sizeof(bool)));
+
+    while (has_frontier) {
+        cudaMemset(d_next_frontier, false, n * sizeof(bool));
         
-        bfs_kernel<<<num_blocks, BLOCK_SIZE>>>(
-            d_adjacency_list,
-            d_adjacency_offsets,
-            d_distances,
-            d_frontier,
-            d_next_frontier,
-            n,
-            level
-        );
+        bfs_kernel<<<num_blocks, block_size>>>(
+            d_adjacency_list, d_adjacency_offset, d_distances,
+            d_frontier, d_next_frontier, n);
         
-        CUDA_CHECK(cudaDeviceSynchronize());
-        
+        // Swap frontiers
         std::swap(d_frontier, d_next_frontier);
         
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(h_next_frontier.data()), d_frontier, n * sizeof(bool), cudaMemcpyDeviceToHost));
+        // Check if we should continue
+        vector<bool> current_frontier(n);
+        cudaMemcpy(current_frontier.data(), d_frontier, 
+            n * sizeof(bool), cudaMemcpyDeviceToHost);
         
-        continue_bfs = false;
-        for (bool b : h_next_frontier) {
+        has_frontier = false;
+        for (bool b : current_frontier) {
             if (b) {
-                continue_bfs = true;
+                has_frontier = true;
                 nodes_visited++;
             }
         }
-        
-        if (continue_bfs) max_depth = level;
-        level++;
-        
-    } while (continue_bfs);
+    }
 
-    CUDA_CHECK(cudaFree(d_adjacency_list));
-    CUDA_CHECK(cudaFree(d_adjacency_offsets));
-    CUDA_CHECK(cudaFree(d_distances));
-    CUDA_CHECK(cudaFree(d_frontier));
-    CUDA_CHECK(cudaFree(d_next_frontier));
+    // Copy final distances back to host
+    cudaMemcpy(distances.data(), d_distances, 
+        n * sizeof(int), cudaMemcpyDeviceToHost);
     
+    // Calculate max_depth
+    for (int d : distances) {
+        if (d != INT_MAX) {
+            max_depth = std::max(max_depth, d);
+        }
+    }
+
     auto end_time = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(end_time - start_time);
     
@@ -145,6 +138,13 @@ void BFS_GPU(const vector<vector<int>>& graph, int source, int branching_factor)
            duration.count() / 1000.0,
            max_depth,
            nodes_visited);
+
+    // Cleanup
+    cudaFree(d_adjacency_list);
+    cudaFree(d_adjacency_offset);
+    cudaFree(d_distances);
+    cudaFree(d_frontier);
+    cudaFree(d_next_frontier);
 }
 
 vector<vector<int>> read_graph(ifstream& file) {
