@@ -91,8 +91,8 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
         cudaMemcpy(d_new_frontier_size, &new_frontier_size, sizeof(int), cudaMemcpyHostToDevice);
 
         // Launch kernel
-        int block_size = 256;
-        int num_blocks = (frontier_size + block_size - 1) / block_size;
+        int block_size = 1024;
+        int num_blocks = min(65535, (frontier_size + block_size - 1) / block_size);
         process_level_kernel<<<num_blocks, block_size>>>(
             d_adjacency_list,
             d_adjacency_offsets,
