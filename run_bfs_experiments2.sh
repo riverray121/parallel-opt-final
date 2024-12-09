@@ -4,27 +4,31 @@
 mkdir -p results
 
 # Create CSV file with headers
-echo "graph_size,branching_factor,algorithm,source_node,time_ms,max_depth,nodes_visited" > results/bfs_results_dynamic.csv
+echo "graph_size,branching_factor,algorithm,source_node,time_ms,max_depth,nodes_visited" > results/bfs_results.csv
 
-# Compile the dynamic parallelism version
+# Compile all implementations with explicit runtime
 echo "Compiling programs..."
-nvcc -O3 generate_graphs_bf1000.cu -o generate_graphs
-nvcc -arch=sm_35 -rdc=true bfs_gpu3.cu -o bfs_gpu3
+nvcc -O3 generate_graphs.cu -o generate_graphs --cudart shared
+nvcc -O3 bfs_gpu3.cu -o bfs_gpu3 --cudart shared
+nvcc -O3 bfs.cu -o bfs_cpu --cudart shared
 
-# Loop through branching factors (10, 30, 90, 270, 810)
-for bf in 10 30 90 270 810; do
+# Loop through branching factors (10, 30, 90, 270)
+for bf in 10 30 90 270; do
     echo "Testing with branching factor: $bf"
     
     # Generate graphs with current branching factor
     ./generate_graphs $bf
     
-    # Run GPU version with dynamic parallelism
-    ./bfs_gpu3 $bf >> results/bfs_results_dynamic.csv
+    # Run CPU version
+    ./bfs_cpu $bf >> results/bfs_results.csv
+    
+    # Run GPU version
+    ./bfs_gpu3 $bf >> results/bfs_results.csv
 done
 
-echo "Experiments completed! Results saved in results/bfs_results_dynamic.csv"
+echo "Experiments completed! Results saved in results/bfs_results.csv"
 
 # Optional: Run the Python plotting script if it exists
 if [ -f "plot_results.py" ]; then
-    python3 plot_results.py results/bfs_results_dynamic.csv
+    python3 plot_results.py results/bfs_results.csv
 fi 
