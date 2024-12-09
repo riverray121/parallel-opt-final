@@ -6,51 +6,211 @@
 #include <sstream>
 #include <string>
 #include <chrono>
+#include <cuda_runtime.h>
 
-using std::vector;
-using std::queue;
-using std::string;
-using std::cout;
-using std::cerr;
-using std::endl;
-using std::ifstream;
-using std::istringstream;
-using std::chrono::high_resolution_clock;
-using std::chrono::duration_cast;
-using std::chrono::microseconds;
-
-void BFS(const vector<vector<int>>& graph, int source, int branching_factor) {
-    auto start_time = high_resolution_clock::now();
+// CUDA kernel for prefix sum
+__global__ void prefix_sum_kernel(int* d_input, int* d_output, int n) {
+    extern __shared__ int temp[];
     
-    int n = graph.size();
-    vector<int> dist(n, INT_MAX);
-    queue<int> Q;
+    int tid = threadIdx.x;
+    int block_offset = blockIdx.x * blockDim.x;
     
-    int max_depth = 0;
-    int nodes_visited = 0;
+    // Load input into shared memory
+    if (block_offset + tid < n) {
+        temp[tid] = d_input[block_offset + tid];
+    } else {
+        temp[tid] = 0;
+    }
+    __syncthreads();
+    
+    // Up-sweep phase
+    for (int stride = 1; stride < blockDim.x; stride *= 2) {
+        int index = (tid + 1) * 2 * stride - 1;
+        if (index < blockDim.x) {
+            temp[index] += temp[index - stride];
+        }
+        __syncthreads();
+    }
+    
+    // Write results back
+    if (block_offset + tid < n) {
+        d_output[block_offset + tid] = temp[tid];
+    }
+}
 
-    dist[source] = 0;
-    Q.push(source);
-    nodes_visited++;
-
-    while (!Q.empty()) {
-        int current = Q.front();
-        Q.pop();
-
-        for (int neighbor : graph[current]) {
-            if (dist[neighbor] == INT_MAX) {
-                dist[neighbor] = dist[current] + 1;
-                max_depth = std::max(max_depth, dist[neighbor]);
-                nodes_visited++;
-                Q.push(neighbor);
+// CUDA kernel for parallel neighbor processing
+__global__ void process_level_kernel(
+    int* d_adjacency_list,
+    int* d_adjacency_offsets,
+    int* d_distances,
+    int* d_frontier,
+    int* d_new_frontier,
+    int* d_frontier_size,
+    int* d_new_frontier_size,
+    int* d_local_sizes,
+    int* d_local_offsets,
+    int current_depth,
+    int max_neighbors
+) {
+    extern __shared__ int shared_mem[];
+    int* local_indices = shared_mem;
+    
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    
+    int local_count = 0;
+    
+    // Process nodes and store neighbors locally
+    for (int idx = tid; idx < *d_frontier_size; idx += stride) {
+        int current = d_frontier[idx];
+        int start = d_adjacency_offsets[current];
+        int end = d_adjacency_offsets[current + 1];
+        
+        for (int i = start; i < end && local_count < max_neighbors; i++) {
+            int neighbor = d_adjacency_list[i];
+            // Simple distance check and update, no atomic needed due to benign race condition 
+            // as described in the NVIDIA paper
+            if (d_distances[neighbor] == INT_MAX) {
+                d_distances[neighbor] = current_depth + 1;
+                local_indices[local_count++] = neighbor;
             }
         }
     }
-
-    auto end_time = high_resolution_clock::now();
-    auto duration = duration_cast<microseconds>(end_time - start_time);
     
-    printf("%lu,%d,CPU,%d,%.3f,%d,%d\n", 
+    // Store local count
+    d_local_sizes[tid] = local_count;
+    __syncthreads();
+    
+    // Wait for prefix sum to be computed externally
+    
+    // Copy local results to final positions
+    int write_offset = (tid == 0) ? 0 : d_local_offsets[tid - 1];
+    for (int i = 0; i < local_count; i++) {
+        d_new_frontier[write_offset + i] = local_indices[i];
+    }
+    
+    // Update total frontier size (only done by last thread)
+    if (tid == gridDim.x * blockDim.x - 1) {
+        *d_new_frontier_size = d_local_offsets[tid] + d_local_sizes[tid];
+    }
+}
+
+void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    int n = graph.size();
+    
+    // Convert graph to CSR format
+    std::vector<int> adjacency_list;
+    std::vector<int> adjacency_offsets(n + 1, 0);
+    
+    for (int i = 0; i < n; i++) {
+        adjacency_offsets[i + 1] = adjacency_offsets[i] + graph[i].size();
+        for (int neighbor : graph[i]) {
+            adjacency_list.push_back(neighbor);
+        }
+    }
+
+    // Allocate device memory
+    int *d_adjacency_list, *d_adjacency_offsets, *d_distances;
+    int *d_frontier, *d_new_frontier;
+    int *d_frontier_size, *d_new_frontier_size;
+    
+    cudaMalloc(&d_adjacency_list, adjacency_list.size() * sizeof(int));
+    cudaMalloc(&d_adjacency_offsets, (n + 1) * sizeof(int));
+    cudaMalloc(&d_distances, n * sizeof(int));
+    cudaMalloc(&d_frontier, n * sizeof(int));
+    cudaMalloc(&d_new_frontier, n * sizeof(int));
+    cudaMalloc(&d_frontier_size, sizeof(int));
+    cudaMalloc(&d_new_frontier_size, sizeof(int));
+
+    // Initialize host arrays
+    std::vector<int> distances(n, INT_MAX);
+    distances[source] = 0;
+    std::vector<int> frontier = {source};
+    int frontier_size = 1;
+    int new_frontier_size = 0;
+    
+    // Copy data to device
+    cudaMemcpy(d_adjacency_list, adjacency_list.data(), adjacency_list.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_adjacency_offsets, adjacency_offsets.data(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_distances, distances.data(), n * sizeof(int), cudaMemcpyHostToDevice);
+    
+    int current_depth = 0;
+    int max_depth = 0;
+    int nodes_visited = 1;
+
+    // Additional allocations
+    int max_threads = 1024;  // Adjust based on your GPU
+    int max_neighbors = 256; // Adjust based on your needs
+    int *d_local_sizes, *d_local_offsets;
+    cudaMalloc(&d_local_sizes, max_threads * sizeof(int));
+    cudaMalloc(&d_local_offsets, max_threads * sizeof(int));
+    
+    // BFS iterations
+    while (frontier_size > 0) {
+        cudaMemcpy(d_frontier, frontier.data(), frontier_size * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemset(d_new_frontier_size, 0, sizeof(int));
+        
+        // Launch kernel with shared memory
+        int block_size = 256;
+        int num_blocks = (frontier_size + block_size - 1) / block_size;
+        int shared_mem_size = block_size * max_neighbors * sizeof(int);
+        
+        process_level_kernel<<<num_blocks, block_size, shared_mem_size>>>(
+            d_adjacency_list,
+            d_adjacency_offsets,
+            d_distances,
+            d_frontier,
+            d_new_frontier,
+            d_frontier_size,
+            d_new_frontier_size,
+            d_local_sizes,
+            d_local_offsets,
+            current_depth,
+            max_neighbors
+        );
+        
+        // Compute prefix sum for local offsets
+        prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(
+            d_local_sizes,
+            d_local_offsets,
+            max_threads
+        );
+        
+        // Get new frontier size
+        cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
+        
+        // Get new frontier
+        frontier.resize(new_frontier_size);
+        cudaMemcpy(frontier.data(), d_new_frontier, new_frontier_size * sizeof(int), cudaMemcpyDeviceToHost);
+        
+        frontier_size = new_frontier_size;
+        new_frontier_size = 0;
+        
+        current_depth++;
+        if (frontier_size > 0) {
+            max_depth = current_depth;
+            nodes_visited += frontier_size;
+        }
+    }
+
+    // Clean up
+    cudaFree(d_adjacency_list);
+    cudaFree(d_adjacency_offsets);
+    cudaFree(d_distances);
+    cudaFree(d_frontier);
+    cudaFree(d_new_frontier);
+    cudaFree(d_frontier_size);
+    cudaFree(d_new_frontier_size);
+    cudaFree(d_local_sizes);
+    cudaFree(d_local_offsets);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    
+    printf("%lu,%d,GPU,%d,%.3f,%d,%d\n", 
            graph.size(),          // graph_size
            branching_factor,      // branching_factor
            source,               // source_node
@@ -59,17 +219,17 @@ void BFS(const vector<vector<int>>& graph, int source, int branching_factor) {
            nodes_visited);       // nodes_visited
 }
 
-vector<vector<int>> read_graph(ifstream& file) {
-    string line;
-    getline(file, line);
+std::vector<std::vector<int>> read_graph(std::ifstream& file) {
+    std::string line;
+    std::getline(file, line);
     int n = std::stoi(line);
     
-    vector<vector<int>> graph(n);
+    std::vector<std::vector<int>> graph(n);
     
     for (int i = 0; i < n; i++) {
-        getline(file, line);
-        istringstream iss(line);
-        string vertex;
+        std::getline(file, line);
+        std::istringstream iss(line);
+        std::string vertex;
         iss >> vertex;
         
         int neighbor;
@@ -78,22 +238,23 @@ vector<vector<int>> read_graph(ifstream& file) {
         }
     }
     
-    getline(file, line);
+    std::getline(file, line);
     return graph;
 }
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
+        // std::cerr << "Usage: " << argv[0] << " <branching_factor>\n";
         return 1;
     }
     
     const int branching_factor = std::stoi(argv[1]);
     
-    auto total_start_time = high_resolution_clock::now();
+    auto total_start_time = std::chrono::high_resolution_clock::now();
     
-    ifstream file("random_graphs.txt");
+    std::ifstream file("random_graphs.txt");
     if (!file.is_open()) {
-        // cerr << "Error: Could not open random_graphs.txt\n";
+        // std::cerr << "Error: Could not open random_graphs.txt\n";
         return 1;
     }
 
@@ -101,15 +262,17 @@ int main(int argc, char* argv[]) {
     int total_searches = 0;
     
     while (!file.eof()) {
-        string peek;
-        if (!getline(file, peek)) break;
+        std::string peek;
+        if (!std::getline(file, peek)) break;
         file.seekg(-peek.length()-1, std::ios::cur);
         
-        vector<vector<int>> graph = read_graph(file);
+        std::vector<std::vector<int>> graph = read_graph(file);
         if (graph.empty()) break;
         
-        BFS(graph, 0, branching_factor);
-        BFS(graph, graph.size() / 2, branching_factor);
+        // std::cout << "\nGraph " << graph_number << " (Size: " << graph.size() << "):\n";
+        
+        BFS_GPU(graph, 0, branching_factor);
+        BFS_GPU(graph, graph.size() / 2, branching_factor);
         
         graph_number++;
         total_searches += 2;
@@ -117,14 +280,14 @@ int main(int argc, char* argv[]) {
 
     file.close();
     
-    auto total_end_time = high_resolution_clock::now();
-    auto total_duration = duration_cast<microseconds>(total_end_time - total_start_time);
+    auto total_end_time = std::chrono::high_resolution_clock::now();
+    auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(total_end_time - total_start_time);
     
-    // cout << "\nTotal Statistics:\n";
-    // cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
-    // cout << "Graphs processed: " << graph_number - 1 << "\n";
-    // cout << "Total searches performed: " << total_searches << "\n";
-    // cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
+    // std::cout << "\nTotal Statistics:\n";
+    // std::cout << "Total time: " << total_duration.count() / 1000.0 << " milliseconds\n";
+    // std::cout << "Graphs processed: " << graph_number - 1 << "\n";
+    // std::cout << "Total searches performed: " << total_searches << "\n";
+    // std::cout << "Average time per search: " << (total_duration.count() / total_searches) / 1000.0 << " milliseconds\n";
 
     return 0;
 }
