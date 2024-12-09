@@ -85,7 +85,7 @@ void BFS_GPU(const vector<vector<int>>& graph, int source, int branching_factor)
     CUDA_CHECK(cudaMemcpy(d_adjacency_list, adjacency_list.data(), adjacency_list.size() * sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_adjacency_offsets, adjacency_offsets.data(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_distances, h_distances.data(), n * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_frontier, h_frontier.data(), n * sizeof(bool), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_frontier, (void*)h_frontier.data(), n * sizeof(bool), cudaMemcpyHostToDevice));
     
     int level = 1;
     int max_depth = 0;
@@ -114,7 +114,7 @@ void BFS_GPU(const vector<vector<int>>& graph, int source, int branching_factor)
         
         std::swap(d_frontier, d_next_frontier);
         
-        CUDA_CHECK(cudaMemcpy(h_next_frontier.data(), d_frontier, n * sizeof(bool), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy((void*)h_next_frontier.data(), d_frontier, n * sizeof(bool), cudaMemcpyDeviceToHost));
         
         continue_bfs = false;
         for (bool b : h_next_frontier) {
