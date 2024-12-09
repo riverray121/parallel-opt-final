@@ -119,6 +119,11 @@ void processTinyFrontierCPU(
     }
 }
 
+// Add these constants at the top
+const int MAX_THREADS_PER_BLOCK = 1024;  // Maximum threads per block for most GPUs
+const int MIN_THREADS_PER_BLOCK = 32;    // Minimum = warp size
+const int TARGET_THREADS_PER_NODE = 2;    // Adjust based on testing
+
 void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
     auto start_time = std::chrono::high_resolution_clock::now();
     
@@ -190,13 +195,17 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
             cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
             cudaMemset(d_new_frontier_size, 0, sizeof(int));
             
-            // Dynamic thread calculation
+            // Dynamically calculate optimal block size
             int block_size = min(MAX_THREADS_PER_BLOCK, 
-                               max(MIN_THREADS_PER_BLOCK, 
-                                   (frontier_size + TARGET_THREADS_PER_NODE - 1) / TARGET_THREADS_PER_NODE));
-            block_size = (block_size + 31) & ~31;  // Round to nearest multiple of 32
+                                max(MIN_THREADS_PER_BLOCK, 
+                                    (frontier_size + TARGET_THREADS_PER_NODE - 1) / TARGET_THREADS_PER_NODE));
             
+            // Round block_size to nearest multiple of 32 (warp size)
+            block_size = (block_size + 31) & ~31;
+            
+            // Calculate number of blocks needed
             int num_blocks = min(65535, (frontier_size + block_size - 1) / block_size);
+            
             int shared_mem_size = block_size * max_neighbors * sizeof(int);
             
             process_level_kernel<<<num_blocks, block_size, shared_mem_size>>>(
