@@ -91,11 +91,11 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     int *d_adjacency_list, *d_adjacency_offsets, *d_distances;
     int *d_current_frontier, *d_next_frontier;
     
-    cudaMallocAsync(&d_adjacency_list, adjacency_list.size() * sizeof(int), stream);
-    cudaMallocAsync(&d_adjacency_offsets, (n + 1) * sizeof(int), stream);
-    cudaMallocAsync(&d_distances, n * sizeof(int), stream);
-    cudaMallocAsync(&d_current_frontier, n * sizeof(int), stream);
-    cudaMallocAsync(&d_next_frontier, n * sizeof(int), stream);
+    cudaMalloc(&d_adjacency_list, adjacency_list.size() * sizeof(int));
+    cudaMalloc(&d_adjacency_offsets, (n + 1) * sizeof(int));
+    cudaMalloc(&d_distances, n * sizeof(int));
+    cudaMalloc(&d_current_frontier, n * sizeof(int));
+    cudaMalloc(&d_next_frontier, n * sizeof(int));
 
     // Initialize arrays asynchronously
     cudaMemsetAsync(d_distances, INT_MAX, n * sizeof(int), stream);
@@ -144,12 +144,12 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     cudaStreamSynchronize(stream);
 
     // Cleanup with stream
-    cudaFreeAsync(d_adjacency_list, stream);
-    cudaFreeAsync(d_adjacency_offsets, stream);
-    cudaFreeAsync(d_distances, stream);
-    cudaFreeAsync(d_current_frontier, stream);
-    cudaFreeAsync(d_next_frontier, stream);
-    cudaFreeAsync(d_state, stream);
+    cudaFree(d_adjacency_list);
+    cudaFree(d_adjacency_offsets);
+    cudaFree(d_distances);
+    cudaFree(d_current_frontier);
+    cudaFree(d_next_frontier);
+    cudaFree(d_state);
     cudaStreamDestroy(stream);
 
     auto end_time = std::chrono::high_resolution_clock::now();
