@@ -39,11 +39,6 @@ __global__ void process_level_kernel(
     }
 }
 
-// Add this new kernel to manage frontier swapping on GPU
-__global__ void reset_frontier_size(int* d_new_frontier_size) {
-    *d_new_frontier_size = 0;
-}
-
 void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
     auto start_time = std::chrono::high_resolution_clock::now();
     
@@ -89,48 +84,35 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     int max_depth = 0;
     int nodes_visited = 1;
 
-    // Modify frontier management to stay on GPU
-    int *d_current_frontier, *d_next_frontier;
-    cudaMalloc(&d_current_frontier, n * sizeof(int));
-    cudaMalloc(&d_next_frontier, n * sizeof(int));
-    
-    // Initialize source on GPU directly
-    cudaMemset(d_distances, INT_MAX, n * sizeof(int));
-    int initial_frontier[] = {source};
-    cudaMemcpy(d_current_frontier, initial_frontier, sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
-    
-    // Track nodes visited on GPU
-    int *d_nodes_visited;
-    cudaMalloc(&d_nodes_visited, sizeof(int));
-    cudaMemset(d_nodes_visited, 1, sizeof(int));  // Initialize with 1 for source
-
     // BFS iterations
     while (frontier_size > 0) {
-        // Reset new frontier size on GPU
-        reset_frontier_size<<<1, 1>>>(d_new_frontier_size);
-        
-        // Launch kernel (unchanged)
+        cudaMemcpy(d_frontier, frontier.data(), frontier_size * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_new_frontier_size, &new_frontier_size, sizeof(int), cudaMemcpyHostToDevice);
+
+        // Launch kernel
         int block_size = 1024;
         int num_blocks = min(65535, (frontier_size + block_size - 1) / block_size);
         process_level_kernel<<<num_blocks, block_size>>>(
             d_adjacency_list,
             d_adjacency_offsets,
             d_distances,
-            d_current_frontier,
-            d_next_frontier,
+            d_frontier,
+            d_new_frontier,
             d_frontier_size,
             d_new_frontier_size,
             current_depth
         );
 
-        // Swap frontier pointers
-        int *temp = d_current_frontier;
-        d_current_frontier = d_next_frontier;
-        d_next_frontier = temp;
+        // Get new frontier size
+        cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
         
-        // Only get the size, not the full frontier
-        cudaMemcpy(&frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
+        // Get new frontier
+        frontier.resize(new_frontier_size);
+        cudaMemcpy(frontier.data(), d_new_frontier, new_frontier_size * sizeof(int), cudaMemcpyDeviceToHost);
+        
+        frontier_size = new_frontier_size;
+        new_frontier_size = 0;
         
         current_depth++;
         if (frontier_size > 0) {
@@ -138,11 +120,6 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
             nodes_visited += frontier_size;
         }
     }
-
-    // Update cleanup
-    cudaFree(d_current_frontier);
-    cudaFree(d_next_frontier);
-    cudaFree(d_nodes_visited);
 
     // Clean up
     cudaFree(d_adjacency_list);
