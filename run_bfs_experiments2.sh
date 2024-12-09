@@ -9,7 +9,7 @@ echo "graph_size,branching_factor,algorithm,source_node,time_ms,max_depth,nodes_
 # Compile all implementations with explicit runtime and compute capability
 echo "Compiling programs..."
 nvcc -O3 generate_graphs_bf1000.cu -o generate_graphs --cudart shared
-nvcc -O3 bfs_gpu3.cu -o bfs_gpu3 --cudart shared -arch=compute_35 -code=sm_35
+nvcc -O3 bfs_gpu3.cu -o bfs_gpu3 --cudart shared -arch=compute_35 -code=sm_35 -rdc=true
 nvcc -O3 bfs.cu -o bfs_cpu --cudart shared
 
 # Loop through branching factors (10, 30, 90, 270)
