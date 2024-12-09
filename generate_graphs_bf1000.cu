@@ -9,8 +9,13 @@ void generate_graph(std::ofstream& file, int size, int branching_factor) {
     
     for (int i = 0; i < size; i++) {
         file << i;
-        for (int j = 0; j < branching_factor && i + j + 1 < size; j++) {
-            file << " " << (i + j + 1);
+        // Connect to multiple nodes ahead with some randomness
+        for (int j = 0; j < branching_factor; j++) {
+            // Calculate next node with larger jumps to create shorter paths
+            int next = (i + 1 + (rand() % (size/10))) % size;
+            if (next != i) {  // Avoid self-loops
+                file << " " << next;
+            }
         }
         file << "\n";
     }
@@ -23,6 +28,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    srand(time(nullptr));  // Initialize random seed
     const int branching_factor = std::stoi(argv[1]);
     
     std::ofstream file("random_graphs.txt");
