@@ -8,12 +8,6 @@
 #include <chrono>
 #include <cuda_runtime.h>
 
-// Add constants at global scope, right after includes
-const int MAX_THREADS_PER_BLOCK = 1024;
-const int MIN_THREADS_PER_BLOCK = 32;
-const int TARGET_THREADS_PER_NODE = 2;
-const int SMALL_FRONTIER_THRESHOLD = 64;
-
 // CUDA kernel for prefix sum
 __global__ void prefix_sum_kernel(int* d_input, int* d_output, int n) {
     extern __shared__ int temp[];
@@ -101,30 +95,6 @@ __global__ void process_level_kernel(
     }
 }
 
-void processTinyFrontierCPU(
-    const std::vector<int>& adjacency_list,
-    const std::vector<int>& adjacency_offsets,
-    std::vector<int>& distances,
-    std::vector<int>& frontier,
-    int current_depth,
-    int& new_frontier_size,
-    std::vector<int>& new_frontier) {
-    
-    new_frontier_size = 0;
-    for (int current : frontier) {
-        int start = adjacency_offsets[current];
-        int end = adjacency_offsets[current + 1];
-        
-        for (int i = start; i < end; i++) {
-            int neighbor = adjacency_list[i];
-            if (distances[neighbor] == INT_MAX) {
-                distances[neighbor] = current_depth + 1;
-                new_frontier[new_frontier_size++] = neighbor;
-            }
-        }
-    }
-}
-
 void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
     auto start_time = std::chrono::high_resolution_clock::now();
     
@@ -179,64 +149,42 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     
     // BFS iterations
     while (frontier_size > 0) {
-        if (frontier_size < SMALL_FRONTIER_THRESHOLD) {
-            // Process small frontiers on CPU
-            processTinyFrontierCPU(
-                adjacency_list,
-                adjacency_offsets,
-                distances,
-                frontier,
-                current_depth,
-                new_frontier_size,
-                frontier  // Reuse frontier vector as new_frontier
-            );
-        } else {
-            // Copy current frontier to GPU
-            cudaMemcpy(d_frontier, frontier.data(), frontier_size * sizeof(int), cudaMemcpyHostToDevice);
-            cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
-            cudaMemset(d_new_frontier_size, 0, sizeof(int));
-            
-            // Dynamically calculate optimal block size
-            int block_size = min(MAX_THREADS_PER_BLOCK, 
-                                max(MIN_THREADS_PER_BLOCK, 
-                                    (frontier_size + TARGET_THREADS_PER_NODE - 1) / TARGET_THREADS_PER_NODE));
-            
-            // Round block_size to nearest multiple of 32 (warp size)
-            block_size = (block_size + 31) & ~31;
-            
-            // Calculate number of blocks needed
-            int num_blocks = min(65535, (frontier_size + block_size - 1) / block_size);
-            
-            int shared_mem_size = block_size * max_neighbors * sizeof(int);
-            
-            process_level_kernel<<<num_blocks, block_size, shared_mem_size>>>(
-                d_adjacency_list,
-                d_adjacency_offsets,
-                d_distances,
-                d_frontier,
-                d_new_frontier,
-                d_frontier_size,
-                d_new_frontier_size,
-                d_local_sizes,
-                d_local_offsets,
-                current_depth,
-                max_neighbors
-            );
-            
-            // Compute prefix sum for local offsets
-            prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(
-                d_local_sizes,
-                d_local_offsets,
-                max_threads
-            );
-            
-            // Get new frontier size
-            cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
-            
-            // Get new frontier
-            frontier.resize(new_frontier_size);
-            cudaMemcpy(frontier.data(), d_new_frontier, new_frontier_size * sizeof(int), cudaMemcpyDeviceToHost);
-        }
+        cudaMemcpy(d_frontier, frontier.data(), frontier_size * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemset(d_new_frontier_size, 0, sizeof(int));
+        
+        // Launch kernel with shared memory
+        int block_size = 256;
+        int num_blocks = (frontier_size + block_size - 1) / block_size;
+        int shared_mem_size = block_size * max_neighbors * sizeof(int);
+        
+        process_level_kernel<<<num_blocks, block_size, shared_mem_size>>>(
+            d_adjacency_list,
+            d_adjacency_offsets,
+            d_distances,
+            d_frontier,
+            d_new_frontier,
+            d_frontier_size,
+            d_new_frontier_size,
+            d_local_sizes,
+            d_local_offsets,
+            current_depth,
+            max_neighbors
+        );
+        
+        // Compute prefix sum for local offsets
+        prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(
+            d_local_sizes,
+            d_local_offsets,
+            max_threads
+        );
+        
+        // Get new frontier size
+        cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
+        
+        // Get new frontier
+        frontier.resize(new_frontier_size);
+        cudaMemcpy(frontier.data(), d_new_frontier, new_frontier_size * sizeof(int), cudaMemcpyDeviceToHost);
         
         frontier_size = new_frontier_size;
         new_frontier_size = 0;
@@ -343,4 +291,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
