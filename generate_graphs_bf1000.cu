@@ -38,8 +38,9 @@ int main(int argc, char* argv[]) {
     }
     
     // Generate graphs of different sizes
-    std::vector<int> sizes = {1000, 2500, 5000, 10000, 20000};
-    
+    // std::vector<int> sizes = {1000, 2500, 5000, 10000, 20000};
+    std::vector<int> sizes = {1000000, 10000000, 100000000};
+
     for (int size : sizes) {
         generate_graph(file, size, branching_factor);
     }
