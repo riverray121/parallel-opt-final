@@ -7,33 +7,40 @@
 #include <string>
 #include <chrono>
 #include <cuda_runtime.h>
-#include <device_launch_parameters.h>
 
-// CUDA kernel for parallel neighbor processing
-__global__ void process_node_kernel(
-    int* d_adjacency_list,
-    int* d_adjacency_offsets,
-    int* d_distances,
-    int* d_new_frontier,
-    int* d_new_frontier_size,
-    int current_depth,
-    int current_node
-) {
-    int start = d_adjacency_offsets[current_node];
-    int end = d_adjacency_offsets[current_node + 1];
+// PREFIX SUM KERNEL with  beneign race condition
+
+// CUDA kernel for prefix sum
+__global__ void prefix_sum_kernel(int* d_input, int* d_output, int n) {
+    extern __shared__ int temp[];
     
-    // Each thread processes one neighbor
     int tid = threadIdx.x;
-    for (int i = start + tid; i < end; i += blockDim.x) {
-        int neighbor = d_adjacency_list[i];
-        if (atomicCAS(&d_distances[neighbor], INT_MAX, current_depth + 1) == INT_MAX) {
-            int idx = atomicAdd(d_new_frontier_size, 1);
-            d_new_frontier[idx] = neighbor;
+    int block_offset = blockIdx.x * blockDim.x;
+    
+    // Load input into shared memory
+    if (block_offset + tid < n) {
+        temp[tid] = d_input[block_offset + tid];
+    } else {
+        temp[tid] = 0;
+    }
+    __syncthreads();
+    
+    // Up-sweep phase
+    for (int stride = 1; stride < blockDim.x; stride *= 2) {
+        int index = (tid + 1) * 2 * stride - 1;
+        if (index < blockDim.x) {
+            temp[index] += temp[index - stride];
         }
+        __syncthreads();
+    }
+    
+    // Write results back
+    if (block_offset + tid < n) {
+        d_output[block_offset + tid] = temp[tid];
     }
 }
 
-// Modify the existing kernel to use dynamic parallelism
+// CUDA kernel for parallel neighbor processing
 __global__ void process_level_kernel(
     int* d_adjacency_list,
     int* d_adjacency_offsets,
@@ -42,24 +49,49 @@ __global__ void process_level_kernel(
     int* d_new_frontier,
     int* d_frontier_size,
     int* d_new_frontier_size,
-    int current_depth
+    int* d_local_sizes,
+    int* d_local_offsets,
+    int current_depth,
+    int max_neighbors
 ) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= *d_frontier_size) return;
-
-    int current = d_frontier[tid];
+    extern __shared__ int shared_mem[];
+    int* local_indices = shared_mem;
     
-    // Launch a new kernel to process this node's neighbors
-    int neighbor_block_size = 256;
-    process_node_kernel<<<1, neighbor_block_size>>>(
-        d_adjacency_list,
-        d_adjacency_offsets,
-        d_distances,
-        d_new_frontier,
-        d_new_frontier_size,
-        current_depth,
-        current
-    );
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    
+    int local_count = 0;
+    
+    // Process nodes and store neighbors locally
+    for (int idx = tid; idx < *d_frontier_size; idx += stride) {
+        int current = d_frontier[idx];
+        int start = d_adjacency_offsets[current];
+        int end = d_adjacency_offsets[current + 1];
+        
+        for (int i = start; i < end && local_count < max_neighbors; i++) {
+            int neighbor = d_adjacency_list[i];
+            if (atomicCAS(&d_distances[neighbor], INT_MAX, current_depth + 1) == INT_MAX) {
+                local_indices[local_count++] = neighbor;
+            }
+        }
+    }
+    
+    // Store local count
+    d_local_sizes[tid] = local_count;
+    __syncthreads();
+    
+    // Wait for prefix sum to be computed externally
+    
+    // Copy local results to final positions
+    int write_offset = (tid == 0) ? 0 : d_local_offsets[tid - 1];
+    for (int i = 0; i < local_count; i++) {
+        d_new_frontier[write_offset + i] = local_indices[i];
+    }
+    
+    // Update total frontier size (only done by last thread)
+    if (tid == gridDim.x * blockDim.x - 1) {
+        *d_new_frontier_size = d_local_offsets[tid] + d_local_sizes[tid];
+    }
 }
 
 void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
@@ -107,30 +139,45 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     int max_depth = 0;
     int nodes_visited = 1;
 
+    // Additional allocations
+    int max_threads = 1024;  // Adjust based on your GPU
+    int max_neighbors = 256; // Adjust based on your needs
+    int *d_local_sizes, *d_local_offsets;
+    cudaMalloc(&d_local_sizes, max_threads * sizeof(int));
+    cudaMalloc(&d_local_offsets, max_threads * sizeof(int));
+    
     // BFS iterations
     while (frontier_size > 0) {
         cudaMemcpy(d_frontier, frontier.data(), frontier_size * sizeof(int), cudaMemcpyHostToDevice);
         cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_new_frontier_size, &new_frontier_size, sizeof(int), cudaMemcpyHostToDevice);
-
-        // Launch kernel with dynamic parallelism
+        cudaMemset(d_new_frontier_size, 0, sizeof(int));
+        
+        // Launch kernel with shared memory
         int block_size = 256;
         int num_blocks = (frontier_size + block_size - 1) / block_size;
-        void* args[] = {
-            &d_adjacency_list,
-            &d_adjacency_offsets,
-            &d_distances,
-            &d_frontier,
-            &d_new_frontier,
-            &d_frontier_size,
-            &d_new_frontier_size,
-            &current_depth
-        };
+        int shared_mem_size = block_size * max_neighbors * sizeof(int);
         
-        // Launch kernel and synchronize
-        cudaLaunchKernel((void*)process_level_kernel, dim3(num_blocks), dim3(block_size), args, 0, nullptr);
-        cudaDeviceSynchronize();
-
+        process_level_kernel<<<num_blocks, block_size, shared_mem_size>>>(
+            d_adjacency_list,
+            d_adjacency_offsets,
+            d_distances,
+            d_frontier,
+            d_new_frontier,
+            d_frontier_size,
+            d_new_frontier_size,
+            d_local_sizes,
+            d_local_offsets,
+            current_depth,
+            max_neighbors
+        );
+        
+        // Compute prefix sum for local offsets
+        prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(
+            d_local_sizes,
+            d_local_offsets,
+            max_threads
+        );
+        
         // Get new frontier size
         cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
         
@@ -156,6 +203,8 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     cudaFree(d_new_frontier);
     cudaFree(d_frontier_size);
     cudaFree(d_new_frontier_size);
+    cudaFree(d_local_sizes);
+    cudaFree(d_local_offsets);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
