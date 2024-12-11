@@ -8,99 +8,67 @@
 #include <chrono>
 #include <cuda_runtime.h>
 
-/* PREFIX SUM KERNEL without  beneign race condition */
+// Add this structure to track BFS state on GPU
+struct BFSState {
+    int frontier_size;
+    int max_depth;
+    int nodes_visited;
+    bool finished;
+};
 
-// CUDA kernel for prefix sum
-__global__ void prefix_sum_kernel(int* d_input, int* d_output, int n) {
-    extern __shared__ int temp[];
-    
-    int tid = threadIdx.x;
-    int block_offset = blockIdx.x * blockDim.x;
-    
-    // Load input into shared memory
-    if (block_offset + tid < n) {
-        temp[tid] = d_input[block_offset + tid];
-    } else {
-        temp[tid] = 0;
-    }
-    __syncthreads();
-    
-    // Up-sweep phase
-    for (int stride = 1; stride < blockDim.x; stride *= 2) {
-        int index = (tid + 1) * 2 * stride - 1;
-        if (index < blockDim.x) {
-            temp[index] += temp[index - stride];
-        }
-        __syncthreads();
-    }
-    
-    // Write results back
-    if (block_offset + tid < n) {
-        d_output[block_offset + tid] = temp[tid];
-    }
-}
-
-// CUDA kernel for parallel neighbor processing
+// Modify kernel to update BFS state
 __global__ void process_level_kernel(
     int* d_adjacency_list,
     int* d_adjacency_offsets,
     int* d_distances,
-    int* d_frontier,
-    int* d_new_frontier,
-    int* d_frontier_size,
-    int* d_new_frontier_size,
-    int* d_local_sizes,
-    int* d_local_offsets,
-    int current_depth,
-    int max_neighbors
+    int* d_current_frontier,
+    int* d_next_frontier,
+    BFSState* d_state,
+    int current_depth
 ) {
-    extern __shared__ int shared_mem[];
-    int* local_indices = shared_mem;
-    
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     
-    int local_count = 0;
+    // Reset new frontier size at the start
+    if (tid == 0) {
+        d_state->frontier_size = 0;
+    }
+    __syncthreads();
     
-    // Process nodes and store neighbors locally
-    for (int idx = tid; idx < *d_frontier_size; idx += stride) {
-        int current = d_frontier[idx];
+    // Process nodes
+    for (int idx = tid; idx < d_state->frontier_size; idx += stride) {
+        int current = d_current_frontier[idx];
         int start = d_adjacency_offsets[current];
         int end = d_adjacency_offsets[current + 1];
-        
-        for (int i = start; i < end && local_count < max_neighbors; i++) {
+
+        for (int i = start; i < end; i++) {
             int neighbor = d_adjacency_list[i];
-            // Simple distance check and update, no atomic needed due to benign race condition 
-            // as described in the NVIDIA paper
             if (d_distances[neighbor] == INT_MAX) {
                 d_distances[neighbor] = current_depth + 1;
-                local_indices[local_count++] = neighbor;
+                int frontier_idx = atomicAdd(&d_state->frontier_size, 1);
+                d_next_frontier[frontier_idx] = neighbor;
             }
         }
     }
     
-    // Store local count
-    d_local_sizes[tid] = local_count;
-    __syncthreads();
-    
-    // Wait for prefix sum to be computed externally
-    
-    // Copy local results to final positions
-    int write_offset = (tid == 0) ? 0 : d_local_offsets[tid - 1];
-    for (int i = 0; i < local_count; i++) {
-        d_new_frontier[write_offset + i] = local_indices[i];
-    }
-    
-    // Update total frontier size (only done by last thread)
-    if (tid == gridDim.x * blockDim.x - 1) {
-        *d_new_frontier_size = d_local_offsets[tid] + d_local_sizes[tid];
+    // Update BFS state
+    if (tid == 0) {
+        if (d_state->frontier_size > 0) {
+            d_state->max_depth = current_depth + 1;
+            atomicAdd(&d_state->nodes_visited, d_state->frontier_size);
+        } else {
+            d_state->finished = true;
+        }
     }
 }
 
 void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branching_factor) {
     auto start_time = std::chrono::high_resolution_clock::now();
-    
     int n = graph.size();
+    
+    // Create CUDA stream for asynchronous operations
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
     
     // Convert graph to CSR format
     std::vector<int> adjacency_list;
@@ -113,112 +81,84 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
         }
     }
 
-    // Allocate device memory
+    // Allocate and initialize BFS state
+    BFSState* d_state;
+    cudaMalloc(&d_state, sizeof(BFSState));
+    BFSState initial_state = {1, 0, 1, false};  // Start with source node
+    cudaMemcpyAsync(d_state, &initial_state, sizeof(BFSState), cudaMemcpyHostToDevice, stream);
+    
+    // Allocate and initialize other GPU memory
     int *d_adjacency_list, *d_adjacency_offsets, *d_distances;
-    int *d_frontier, *d_new_frontier;
-    int *d_frontier_size, *d_new_frontier_size;
+    int *d_current_frontier, *d_next_frontier;
     
     cudaMalloc(&d_adjacency_list, adjacency_list.size() * sizeof(int));
     cudaMalloc(&d_adjacency_offsets, (n + 1) * sizeof(int));
     cudaMalloc(&d_distances, n * sizeof(int));
-    cudaMalloc(&d_frontier, n * sizeof(int));
-    cudaMalloc(&d_new_frontier, n * sizeof(int));
-    cudaMalloc(&d_frontier_size, sizeof(int));
-    cudaMalloc(&d_new_frontier_size, sizeof(int));
+    cudaMalloc(&d_current_frontier, n * sizeof(int));
+    cudaMalloc(&d_next_frontier, n * sizeof(int));
 
-    // Initialize host arrays
-    std::vector<int> distances(n, INT_MAX);
-    distances[source] = 0;
-    std::vector<int> frontier = {source};
-    int frontier_size = 1;
-    int new_frontier_size = 0;
-    
-    // Copy data to device
-    cudaMemcpy(d_adjacency_list, adjacency_list.data(), adjacency_list.size() * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_adjacency_offsets, adjacency_offsets.data(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_distances, distances.data(), n * sizeof(int), cudaMemcpyHostToDevice);
-    
-    int current_depth = 0;
-    int max_depth = 0;
-    int nodes_visited = 1;
+    // Initialize arrays asynchronously
+    cudaMemsetAsync(d_distances, INT_MAX, n * sizeof(int), stream);
+    cudaMemcpyAsync(d_adjacency_list, adjacency_list.data(), adjacency_list.size() * sizeof(int), cudaMemcpyHostToDevice, stream);
+    cudaMemcpyAsync(d_adjacency_offsets, adjacency_offsets.data(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice, stream);
 
-    // Additional allocations
-    int max_threads = 1024;  // Adjust based on your GPU
-    int max_neighbors = 256; // Adjust based on your needs
-    int *d_local_sizes, *d_local_offsets;
-    cudaMalloc(&d_local_sizes, max_threads * sizeof(int));
-    cudaMalloc(&d_local_offsets, max_threads * sizeof(int));
-    
+    // Initialize source node
+    int initial_frontier[] = {source};
+    cudaMemcpyAsync(d_current_frontier, initial_frontier, sizeof(int), cudaMemcpyHostToDevice, stream);
+
     // BFS iterations
-    while (frontier_size > 0) {
-        cudaMemcpy(d_frontier, frontier.data(), frontier_size * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_frontier_size, &frontier_size, sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemset(d_new_frontier_size, 0, sizeof(int));
+    int current_depth = 0;
+    BFSState host_state;
+    do {
+        int block_size = 1024;
+        int num_blocks = 256;  // Adjust based on GPU capabilities
         
-        // Launch kernel with shared memory
-        int block_size = 256;
-        int num_blocks = (frontier_size + block_size - 1) / block_size;
-        int shared_mem_size = block_size * max_neighbors * sizeof(int);
-        
-        process_level_kernel<<<num_blocks, block_size, shared_mem_size>>>(
+        process_level_kernel<<<num_blocks, block_size, 0, stream>>>(
             d_adjacency_list,
             d_adjacency_offsets,
             d_distances,
-            d_frontier,
-            d_new_frontier,
-            d_frontier_size,
-            d_new_frontier_size,
-            d_local_sizes,
-            d_local_offsets,
-            current_depth,
-            max_neighbors
+            d_current_frontier,
+            d_next_frontier,
+            d_state,
+            current_depth
         );
-        
-        // Compute prefix sum for local offsets
-        prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(
-            d_local_sizes,
-            d_local_offsets,
-            max_threads
-        );
-        
-        // Get new frontier size
-        cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
-        
-        // Get new frontier
-        frontier.resize(new_frontier_size);
-        cudaMemcpy(frontier.data(), d_new_frontier, new_frontier_size * sizeof(int), cudaMemcpyDeviceToHost);
-        
-        frontier_size = new_frontier_size;
-        new_frontier_size = 0;
-        
-        current_depth++;
-        if (frontier_size > 0) {
-            max_depth = current_depth;
-            nodes_visited += frontier_size;
-        }
-    }
 
-    // Clean up
+        // Swap frontier buffers
+        std::swap(d_current_frontier, d_next_frontier);
+        current_depth++;
+
+        // Only check state periodically or for termination
+        if (current_depth % 100 == 0) {
+            cudaMemcpyAsync(&host_state, d_state, sizeof(BFSState), 
+                           cudaMemcpyDeviceToHost, stream);
+            cudaStreamSynchronize(stream);
+        }
+    } while (!host_state.finished);
+
+    // Get final state
+    cudaMemcpyAsync(&host_state, d_state, sizeof(BFSState), 
+                    cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+
+    // Cleanup with stream
     cudaFree(d_adjacency_list);
     cudaFree(d_adjacency_offsets);
     cudaFree(d_distances);
-    cudaFree(d_frontier);
-    cudaFree(d_new_frontier);
-    cudaFree(d_frontier_size);
-    cudaFree(d_new_frontier_size);
-    cudaFree(d_local_sizes);
-    cudaFree(d_local_offsets);
+    cudaFree(d_current_frontier);
+    cudaFree(d_next_frontier);
+    cudaFree(d_state);
+    cudaStreamDestroy(stream);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     
     printf("%lu,%d,GPU,%d,%.3f,%d,%d\n", 
-           graph.size(),          // graph_size
-           branching_factor,      // branching_factor
-           source,               // source_node
-           duration.count() / 1000.0,  // time_ms
-           max_depth,            // max_depth
-           nodes_visited);       // nodes_visited
+           graph.size(),
+           branching_factor,
+           source,
+           duration.count() / 1000.0,
+           host_state.max_depth,
+           host_state.nodes_visited);
 }
 
 std::vector<std::vector<int>> read_graph(std::ifstream& file) {
