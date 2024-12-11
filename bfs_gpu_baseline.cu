@@ -8,6 +8,8 @@
 #include <chrono>
 #include <cuda_runtime.h>
 
+// Baseline parallel BFS
+
 // CUDA kernel for parallel neighbor processing
 __global__ void process_level_kernel(
     int* d_adjacency_list,
