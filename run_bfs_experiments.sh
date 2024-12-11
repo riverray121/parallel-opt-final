@@ -8,11 +8,12 @@ echo "graph_size,branching_factor,algorithm,source_node,time_ms,max_depth,nodes_
 
 # Compile all implementations
 echo "Compiling programs..."
-nvcc -O3 generate_graphs_bf1000.cu -o generate_graphs
+nvcc -O3 generate_graphs_bf.cu -o generate_graphs
 nvcc -O3 bfs_gpu1.cu -o bfs_gpu1
 nvcc -O3 bfs.cu -o bfs_cpu
 
 # Loop through branching factors (10, 30, 90, 270, 810)
+# for bf in 2 5 10 15 20; do
 for bf in 10 30 90 270 810; do
     echo "Testing with branching factor: $bf"
     
