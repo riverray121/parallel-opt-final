@@ -9,10 +9,10 @@ void generate_graph(std::ofstream& file, int size, int branching_factor) {
     
     for (int i = 0; i < size; i++) {
         file << i;
-        // Connect to multiple nodes ahead with some randomness
+        // Connect to random nodes
         for (int j = 0; j < branching_factor; j++) {
-            // Calculate next node with larger jumps to create shorter paths
-            int next = (i + 1 + (rand() % (size/10))) % size;
+            // Generate completely random connection
+            int next = rand() % size;
             if (next != i) {  // Avoid self-loops
                 file << " " << next;
             }
@@ -38,8 +38,8 @@ int main(int argc, char* argv[]) {
     }
     
     // Generate graphs of different sizes
-    // std::vector<int> sizes = {1000, 2500, 5000, 10000, 20000};
-    std::vector<int> sizes = {1000000, 10000000};
+    std::vector<int> sizes = {1000, 2500, 5000, 10000, 20000};
+    // std::vector<int> sizes = {1000000, 10000000};
 
     for (int size : sizes) {
         generate_graph(file, size, branching_factor);
