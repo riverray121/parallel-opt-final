@@ -13,7 +13,8 @@ void generate_graph(std::ofstream& file, int size, int branching_factor) {
         for (int j = 0; j < branching_factor; j++) {
             // Generate completely random connection
             int next = rand() % size;
-            if (next != i) {  // Avoid self-loops
+            // Avoid self-loops
+            if (next != i) {
                 file << " " << next;
             }
         }
@@ -28,7 +29,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    srand(time(nullptr));  // Initialize random seed
+    // Initialize random seed
+    srand(time(nullptr));  
     const int branching_factor = std::stoi(argv[1]);
     
     std::ofstream file("random_graphs.txt");

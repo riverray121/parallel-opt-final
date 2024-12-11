@@ -82,9 +82,7 @@ __global__ void process_level_kernel(
     // Store local count
     d_local_sizes[tid] = local_count;
     __syncthreads();
-    
-    // Wait for prefix sum to be computed externally
-    
+        
     // Copy local results to final positions
     int write_offset = (tid == 0) ? 0 : d_local_offsets[tid - 1];
     for (int i = 0; i < local_count; i++) {
@@ -143,8 +141,8 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     int nodes_visited = 1;
 
     // Additional allocations
-    int max_threads = 1024;  // Adjust based on your GPU
-    int max_neighbors = 256; // Adjust based on your needs
+    int max_threads = 1024;
+    int max_neighbors = 256;
     int *d_local_sizes, *d_local_offsets;
     cudaMalloc(&d_local_sizes, max_threads * sizeof(int));
     cudaMalloc(&d_local_offsets, max_threads * sizeof(int));
@@ -175,11 +173,7 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
         );
         
         // Compute prefix sum for local offsets
-        prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(
-            d_local_sizes,
-            d_local_offsets,
-            max_threads
-        );
+        prefix_sum_kernel<<<1, max_threads, max_threads * sizeof(int)>>>(d_local_sizes, d_local_offsets, max_threads);
         
         // Get new frontier size
         cudaMemcpy(&new_frontier_size, d_new_frontier_size, sizeof(int), cudaMemcpyDeviceToHost);
@@ -212,13 +206,7 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     
-    printf("%lu,%d,GPU,%d,%.3f,%d,%d\n", 
-           graph.size(),          // graph_size
-           branching_factor,      // branching_factor
-           source,               // source_node
-           duration.count() / 1000.0,  // time_ms
-           max_depth,            // max_depth
-           nodes_visited);       // nodes_visited
+    printf("%lu,%d,GPU,%d,%.3f,%d,%d\n", graph.size(), branching_factor, source, duration.count() / 1000.0, max_depth, nodes_visited);
 }
 
 std::vector<std::vector<int>> read_graph(std::ifstream& file) {

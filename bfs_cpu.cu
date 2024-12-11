@@ -50,13 +50,7 @@ void BFS(const vector<vector<int>>& graph, int source, int branching_factor) {
     auto end_time = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(end_time - start_time);
     
-    printf("%lu,%d,CPU,%d,%.3f,%d,%d\n", 
-           graph.size(),          // graph_size
-           branching_factor,      // branching_factor
-           source,               // source_node
-           duration.count() / 1000.0,  // time_ms
-           max_depth,            // max_depth
-           nodes_visited);       // nodes_visited
+    printf("%lu,%d,CPU,%d,%.3f,%d,%d\n", graph.size(), branching_factor, source, duration.count() / 1000.0, max_depth, nodes_visited);
 }
 
 vector<vector<int>> read_graph(ifstream& file) {

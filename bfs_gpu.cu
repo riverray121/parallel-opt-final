@@ -8,6 +8,8 @@
 #include <chrono>
 #include <cuda_runtime.h>
 
+// Baseline parallel BFS
+
 // CUDA kernel for parallel neighbor processing
 __global__ void process_level_kernel(
     int* d_adjacency_list,
@@ -20,7 +22,7 @@ __global__ void process_level_kernel(
     int current_depth
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;  // Total number of threads
+    int stride = blockDim.x * gridDim.x;
     
     // Process multiple nodes per thread using striding
     for (int idx = tid; idx < *d_frontier_size; idx += stride) {
@@ -133,13 +135,7 @@ void BFS_GPU(const std::vector<std::vector<int>>& graph, int source, int branchi
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     
-    printf("%lu,%d,GPU,%d,%.3f,%d,%d\n", 
-           graph.size(),          // graph_size
-           branching_factor,      // branching_factor
-           source,               // source_node
-           duration.count() / 1000.0,  // time_ms
-           max_depth,            // max_depth
-           nodes_visited);       // nodes_visited
+    printf("%lu,%d,GPU,%d,%.3f,%d,%d\n", graph.size(), branching_factor, source, duration.count() / 1000.0, max_depth, nodes_visited);
 }
 
 std::vector<std::vector<int>> read_graph(std::ifstream& file) {
